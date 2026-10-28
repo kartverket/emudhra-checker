@@ -1,6 +1,6 @@
 # emudhra-checker
 
-**Disclosure: eMudhra-checker has been developed with the aid of Github Copilot**
+**Disclosure: eMudhra-checker has been developed with the aid of Github Copilot and Claude Code**
 
 Scans container images for the certificates affected by the October 2026
 eMudhra CA key compromise. It reads images straight from the registry (no
