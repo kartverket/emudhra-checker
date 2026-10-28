@@ -84,12 +84,20 @@ func deletePaths[T any](records map[string]T, match func(string) bool) {
 	maps.DeleteFunc(records, func(filename string, _ T) bool { return match(filename) })
 }
 
-func (s *imageScan) scanImageLayer(layer v1.Layer) error {
-	digest, err := layer.Digest()
+// scanImageLayer reads a layer as the registry stores it, checked against its
+// digest. With uncompressed, it reads the layer tar, checked against its diff
+// ID: docker image save usually writes uncompressed layers, and their digest
+// would mean compressing them again.
+func (s *imageScan) scanImageLayer(layer v1.Layer, uncompressed bool) error {
+	digestOf, open := layer.Digest, layer.Compressed
+	if uncompressed {
+		digestOf, open = layer.DiffID, layer.Uncompressed
+	}
+	digest, err := digestOf()
 	if err != nil {
 		return fmt.Errorf("read layer digest: %w", err)
 	}
-	blob, err := layer.Compressed()
+	blob, err := open()
 	if err != nil {
 		return fmt.Errorf("%w: fetch layer %s: %w", errPull, digest, err)
 	}

@@ -20,11 +20,17 @@ import (
 // errPull marks failures to download the image, as opposed to reading it.
 var errPull = errors.New("cannot pull image")
 
-// Image downloads one image and scans its final filesystem. Errors do not
-// return: they set Status to ERR_DOCKER_PULL or UNKNOWN and fill Error.
-func Image(ctx context.Context, target inventory.ImageTarget, certificates []certdb.DistrustedCertificate) ImageResult {
+// Image downloads one image, from the local Docker installation if local is
+// set, and scans its final filesystem. Errors do not return: they set Status
+// to ERR_DOCKER_PULL or UNKNOWN and fill Error.
+func Image(
+	ctx context.Context,
+	target inventory.ImageTarget,
+	certificates []certdb.DistrustedCertificate,
+	local bool,
+) ImageResult {
 	result := newResult(target)
-	err := inspectImage(ctx, &result, certificates)
+	err := inspectImage(ctx, &result, certificates, local)
 	if err != nil {
 		result.Error = strings.TrimSpace(err.Error())
 		if errors.Is(err, errPull) {
@@ -34,12 +40,28 @@ func Image(ctx context.Context, target inventory.ImageTarget, certificates []cer
 	return result
 }
 
-// inspectImage fills in result from the registry. On error the status stays UNKNOWN.
-func inspectImage(ctx context.Context, result *ImageResult, certificates []certdb.DistrustedCertificate) error {
-	image, err := registry.Fetch(ctx, result.Image)
+// fetch gets an image from its registry, or from the local Docker
+// installation. The function it returns frees what the image holds.
+func fetch(ctx context.Context, reference string, local bool) (v1.Image, func(), error) {
+	if local {
+		return registry.Local(ctx, reference)
+	}
+	image, err := registry.Fetch(ctx, reference)
+	return image, func() {}, err
+}
+
+// inspectImage fills in result from the image. On error the status stays UNKNOWN.
+func inspectImage(
+	ctx context.Context,
+	result *ImageResult,
+	certificates []certdb.DistrustedCertificate,
+	local bool,
+) error {
+	image, release, err := fetch(ctx, result.Image, local)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errPull, err)
 	}
+	defer release()
 	rawConfig, err := image.RawConfigFile()
 	if err != nil {
 		return fmt.Errorf("%w: fetch image config: %w", errPull, err)
@@ -60,7 +82,7 @@ func inspectImage(ctx context.Context, result *ImageResult, certificates []certd
 		return fmt.Errorf("read image layers: %w", err)
 	}
 	for _, layer := range layers {
-		err = scan.scanImageLayer(layer)
+		err = scan.scanImageLayer(layer, local)
 		if err != nil {
 			return err
 		}
