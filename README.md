@@ -98,6 +98,7 @@ report shows the rows.
 |---|---|
 | `-f`, `--image-file FILE` | CSV input file. Repeat for several clusters. `-` reads stdin. |
 | `-o`, `--output FORMAT` | `table` (default), `csv`, or `json`. |
+| `-l`, `--local` | Read all images from the local Docker installation, not from their registries (see [Local images](#local-images)). |
 | `-c`, `--certificates FILE` | Certificate database to use instead of the embedded one. |
 | `--parallel N` | Images to scan at the same time, 1–10 (default 10). |
 | `-h`, `--help` | Show the options. |
@@ -218,7 +219,8 @@ fingerprints the file lists. Use `jq -s` to read the stream as one array.
   prove that the image is safe (see limitations).
 - `ERR_DOCKER_PULL`: the scanner cannot download the image. The tag or digest
   does not exist, the registry needs credentials that are missing or refused
-  (see [Registry access](#registry-access)), or the registry failed. The
+  (see [Registry access](#registry-access)), or the registry failed. With
+  `--local`, the local Docker installation does not have the image. The
   `error` field says which.
 - `UNKNOWN`: the scanner downloaded the image but cannot read it, for
   example a layer that is not a valid tar archive. The `error` field says why.
@@ -350,6 +352,26 @@ registry refuses the stored credentials, the scanner tries once more without
 credentials. Thus a stale login does not block public images.
 
 Requests that fail with HTTP 429 or a server error are retried with backoff.
+
+### Local images
+
+To scan images that only the local Docker installation has, such as images
+that you built and did not push, add `-l` (`--local`):
+
+```bash
+./emudhra-checker -l myapp:dev
+```
+
+The scanner then reads every image with `docker image save` and does not
+contact a registry. The `docker` CLI must be in `PATH`, and it uses the
+active Docker context. Each export goes to a temporary file in `$TMPDIR`,
+which the scanner removes after the scan. Thus free disk space equal to
+`--parallel` times the largest image is necessary.
+
+The image is the platform that Docker has, for example `linux/arm64` on an
+Apple silicon Mac. The registry scan prefers `linux/amd64`. For local images,
+the `layer_digest` of a finding is the digest of the uncompressed layer (its
+diff ID).
 
 ## How it works
 

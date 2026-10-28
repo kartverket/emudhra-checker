@@ -1,5 +1,5 @@
 // Package registry fetches images from OCI registries with the user's
-// Docker credentials.
+// Docker credentials, or from the local Docker installation.
 package registry
 
 import (

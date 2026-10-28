@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -141,10 +143,51 @@ func TestImage(t *testing.T) {
 			t.Parallel()
 			checkImageResult(
 				t,
-				Image(t.Context(), inventory.ImageTarget{Image: test.image}, certificates),
+				Image(t.Context(), inventory.ImageTarget{Image: test.image}, certificates, false),
 				test.status,
 				bundle,
 			)
 		})
+	}
+}
+
+// TestLocalImage scans images that a stand-in docker CLI exports.
+func TestLocalImage(t *testing.T) {
+	certificates, err := certdb.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := "etc/ssl/certs/ca-certificates.crt"
+	image := testImage(t, map[string][]byte{
+		bundle:              []byte(certificates[0].PEM + "\n"),
+		"opt/java/bin/java": []byte("jvm"),
+	}, v1.Config{})
+	bin, exports := t.TempDir(), t.TempDir()
+	export := filepath.Join(bin, "app.tar")
+	err = tarball.WriteToFile(export, name.MustParseReference("app:dev").(name.Tag), image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// $4 is the reference in: docker image save -- REFERENCE
+	script := "#!/bin/sh\n[ \"$4\" = app:dev ] && exec cat " + export + "\n" +
+		"echo \"Error response from daemon: No such image: $4\" >&2\nexit 1\n"
+	err = os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0o700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TMPDIR", exports)
+
+	scanLocal := func(reference string) ImageResult {
+		return Image(t.Context(), inventory.ImageTarget{Image: reference}, certificates, true)
+	}
+	checkImageResult(t, scanLocal("app:dev"), StatusVulnerable, bundle)
+	missing := scanLocal("app:gone")
+	checkImageResult(t, missing, StatusPullError, bundle)
+	if !strings.Contains(missing.Error, "No such image: app:gone") {
+		t.Errorf("error = %q, want the message from docker", missing.Error)
+	}
+	if left, _ := os.ReadDir(exports); len(left) > 0 {
+		t.Errorf("export files left behind: %v", left)
 	}
 }

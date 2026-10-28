@@ -64,6 +64,7 @@ type options struct {
 	output          string
 	parallelism     int
 	parallelismSet  bool
+	local           bool
 }
 
 // parseFlags parses the command line. Help goes to stderr.
@@ -89,6 +90,8 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 			}
 			return errors.New("must be table, json or csv")
 		})
+	flags.BoolVarP(&opts.local, "local", "l", false,
+		"read the images from the local Docker installation (docker image save), not from their registries")
 	flags.StringVarP(&opts.certificateFile, "certificates", "c", "",
 		"certificate database JSON `FILE` (default: the copy built into the binary)")
 	flags.Func("parallel", fmt.Sprintf(
@@ -164,6 +167,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		"go", runtime.Version(),
 		"parallelism", opts.parallelism,
 		"parallelism_from", parallelismSource,
+		"local", opts.local,
 	)
 
 	targets, err := inventory.Read(opts.images, opts.imageFiles)
@@ -193,7 +197,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		scanned.Add(1)
 		start := tracker.start(target.Image)
 		logger.InfoContext(ctx, "scanning image", "image", target.Image)
-		result := scan.Image(ctx, target, certificates)
+		result := scan.Image(ctx, target, certificates, opts.local)
 		tracker.finish(target.Image)
 		duration := time.Since(start).Round(durationPrecision)
 		switch {
